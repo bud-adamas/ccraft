@@ -39,3 +39,10 @@ build
 
 # gen
 codegen
+
+# vim temporary file
+*.swp
+*.swo
+
+# third-party files
+third-parties/
