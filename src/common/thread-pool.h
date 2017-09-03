@@ -48,7 +48,7 @@ public:
         }
 
         std::function<void(TaskCtxType)>  action;
-        TaskCtxType                       ctx = nullptr;
+        TaskCtxType                       ctx;
     };
 
     /**

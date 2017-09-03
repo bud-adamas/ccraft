@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 2.8)
 project(ccraft)
 
 # debug/release编译控制
@@ -13,6 +13,7 @@ endif(DEFINE_MACRO)
 
 # 使用c++11标准
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 添加gcc flags
 ## -Wno-unused-result：忽略未接返回值的warning
@@ -25,7 +26,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused-function -Wno-unused-v
 set(SRC_ROOT ${PROJECT_SOURCE_DIR}/src)
 set(UT_ROOT ${SRC_ROOT}/unit-test)
 #set(TL_ROOT ${PROJECT_SOURCE_DIR}/tools)
-set(EXTERN_COMPILE_THIRDPARTY_ROOT ${PROJECT_SOURCE_DIR}/third_party)
+set(EXTERN_COMPILE_THIRDPARTY_ROOT ${PROJECT_SOURCE_DIR}/third-parties/installation)
 
 # 第三方库
 include_directories(${EXTERN_COMPILE_THIRDPARTY_ROOT}/include)

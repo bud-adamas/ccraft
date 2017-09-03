@@ -4,7 +4,7 @@ BIN_DIR=$(cd `dirname $0`; pwd)
 CMAKELISTS_ROOT_DIR=${BIN_DIR}/..
 
 PROTOBUF_IDL_DIR_PATH=${CMAKELISTS_ROOT_DIR}/protobuf
-THIRDPARTY_BIN_PATH=${CMAKELISTS_ROOT_DIR}/third_party/bin
+THIRDPARTY_BIN_PATH=${CMAKELISTS_ROOT_DIR}/third-parties/installation/bin
 
 LANG=cpp
 OUT_DIR="/tmp"

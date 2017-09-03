@@ -195,6 +195,7 @@ else
     echo_yellow "------------------------------------------------------------------------------------"
     echo " "
 
+    pwd
     cmake ${BUILD_FLAG} ${CMAKELISTS_ROOT_DIR}
     make ${MAKE_ARGS}
     ERRRC=$?
