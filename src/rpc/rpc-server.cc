@@ -19,28 +19,30 @@
 
 namespace ccraft {
 namespace rpc {
-RpcServer::RpcServer(uint16_t workThreadsCnt, uint16_t netIOThreadsCnt, uint16_t port)
-            : m_iWorkThreadsCnt(workThreadsCnt), m_iNetIOThreadsCnt(netIOThreadsCnt), m_iport(port) {
+RpcServer::RpcServer(uint16_t workThreadsCnt, net::ISocketService *ss, common::MemPool *memPool) :
+    m_pSocketService(ss), m_pRpcMemPool(memPool) {
+    CHECK(ss);
     if (0 == workThreadsCnt) {
-        m_iWorkThreadsCnt = (uint16_t)(common::PHYSICAL_CPUS_CNT);
+        m_iWorkThreadsCnt = (uint16_t)(common::LOGIC_CPUS_CNT * 2);
     }
 
-    m_pRpcMemPool = new common::MemPool();
-    auto nat = new net::net_addr_t("0.0.0.0", m_iport);
-    std::shared_ptr<net::net_addr_t> sspNat(nat);
-    std::shared_ptr<net::INetStackWorkerManager> sspMgr = std::shared_ptr<net::INetStackWorkerManager>(new net::UniqueWorkerManager());
-    m_pSocketService = net::SocketServiceFactory::CreateService(net::SocketProtocal::Tcp,
-                                                                sspNat,
-                                                                port,
-                                                                m_pRpcMemPool,
-                                                                std::bind(&RpcServer::recv_msg, this, std::placeholders::_1),
-                                                                sspMgr);
+    if (!memPool) {
+        m_bOwnMemPool = true;
+        m_pRpcMemPool = new common::MemPool();
+    }
+
     m_hmHandlers.reserve(100);
 }
 
 RpcServer::~RpcServer() {
-    DELETE_PTR(m_pRpcMemPool);
-    DELETE_PTR(m_pSocketService);
+    Stop();
+    if (m_bOwnMemPool) {
+        DELETE_PTR(m_pRpcMemPool);
+    }
+
+    for (auto p : m_hmHandlers) {
+        DELETE_PTR(p.second);
+    }
 }
 
 bool RpcServer::Start() {
@@ -49,11 +51,7 @@ bool RpcServer::Start() {
     }
 
     m_bStopped = false;
-    if (!m_pSocketService->Start(m_iNetIOThreadsCnt, ccraft::net::NonBlockingEventModel::Posix)) {
-        LOGFFUN << "start socket service failed!";
-        throw std::runtime_error("start socket service failed!");
-    }
-
+    hw_rw_memory_barrier();
     m_pWorkThreadPool = new common::ThreadPool<std::shared_ptr<net::NotifyMessage>>(m_iWorkThreadsCnt);
 
     return true;
@@ -66,10 +64,6 @@ bool RpcServer::Stop() {
 
     m_bStopped = true;
     hw_rw_memory_barrier();
-    if (m_pSocketService->Stop()) {
-        throw std::runtime_error("cannot stop RpcServer's SocketService");
-    }
-
     DELETE_PTR(m_pWorkThreadPool);
     return true;
 }
@@ -90,7 +84,7 @@ void RpcServer::FinishRegisterRpc() {
     hw_rw_memory_barrier();
 }
 
-void RpcServer::recv_msg(std::shared_ptr<net::NotifyMessage> sspNM) {
+void RpcServer::HandleMessage(std::shared_ptr<net::NotifyMessage> sspNM) {
     m_pWorkThreadPool->AddTask(std::bind(&RpcServer::proc_msg, this, std::placeholders::_1), sspNM);
 }
 
@@ -104,6 +98,7 @@ void RpcServer::proc_msg(std::shared_ptr<net::NotifyMessage> sspNM) {
                 auto handlerId = ByteOrderUtils::ReadUInt16(reqBuf->GetPos());
                 reqBuf->MoveHeadBack(sizeof(uint16_t));
                 auto handler = m_hmHandlers[handlerId];
+                LOGDFUN2("handle message for handler id ", handlerId);
                 if (!handler) {
                     LOGEFUN << "there is no handler for handler id " << handlerId;
                     m_pSocketService->SendMessage(new RpcErrorResponse(RpcCode::ErrorNoHandler));
@@ -116,7 +111,7 @@ void RpcServer::proc_msg(std::shared_ptr<net::NotifyMessage> sspNM) {
                     m_pSocketService->SendMessage(new RpcErrorResponse(RpcCode::ErrorInternal));
                     return;
                 }
-                if (!ProtoBufUtils::Parse(reqBuf, request.get())) {
+                if (!ProtoBufUtils::Deserialize(reqBuf, request.get())) {
                     LOGEFUN << "cannot parse request for handler id " << handlerId;
                     m_pSocketService->SendMessage(new RpcErrorResponse(RpcCode::ErrorMsg));
                     return;
@@ -127,17 +122,19 @@ void RpcServer::proc_msg(std::shared_ptr<net::NotifyMessage> sspNM) {
                 respMessage->SetId(rm->GetId());
                 respMessage->SetMemPool(m_pRpcMemPool);
                 respMessage->SetPeerInfo(rm->GetPeerInfo());
-                m_pSocketService->SendMessage(respMessage);
-                LOGDFUN2("handled message for handler id ", handlerId);
+                if (!m_pSocketService->SendMessage(respMessage)) {
+                    LOGWFUN << "SendMessage failed for handler id " << handlerId << ", peer = {"
+                            << respMessage->GetPeerInfo().nat.addr << ":" << respMessage->GetPeerInfo().nat.port << "}.";
+                }
             } else {
-                LOGWFUN << "recv message is empty!";
+                LOGEFUN << "recv message is empty!";
             }
             break;
         }
         case net::NotifyMessageType::Worker: {
             auto *wnm = dynamic_cast<net::WorkerNotifyMessage*>(sspNM.get());
             if (wnm) {
-                LOGEFUN << "rc = " << (int)wnm->GetCode() << ", message = " << wnm->What();
+                LOGWFUN << "rc = " << (int)wnm->GetCode() << ", message = " << wnm->What();
             }
             break;
         }
@@ -145,7 +142,7 @@ void RpcServer::proc_msg(std::shared_ptr<net::NotifyMessage> sspNM) {
             auto *snm = dynamic_cast<net::ServerNotifyMessage*>(sspNM.get());
             if (snm) {
                 LOGFFUN << "rc = " << (int)snm->GetCode() << ", message = " << snm->What()
-                        << ". rpc server port = " << m_iport << " crushed!";
+                        << ". rpc server port = " << m_iPort << " crushed!";
             }
 
             throw std::runtime_error("rpc server crushed!");
